@@ -1,5 +1,5 @@
 # installation
-
+## python
 First install anaconda (https://gist.github.com/kauffmanes/5e74916617f9993bc3479f401dfec7da), next create environnement :
 '''
 conda create -n myenv -f requirements.txt
@@ -13,6 +13,8 @@ conda env update -n myenv --file requirements.txt
 '''
 
 To use jupyter notebook in vscode, activate the environnement and install the extension "Jupyter" in vscode.
+## cuda
+To install cuda, follow the instructions on the nvidia website (https://docs.nvidia.com/cuda/wsl-user-guide/index.html). To install the driver, you need to install the windows version of the driver (https://www.nvidia.com/Download/index.aspx?lang=en-us). To Do that get the version of your hardware in your peripheral menu. Then download the driver and install it. You havn't to install driver in wsl. Then install cuda in wsl.
 
 # package
 ## numpy
