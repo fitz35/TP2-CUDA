@@ -43,6 +43,10 @@ In the config file of vscode (settings.json), add the path of the package to the
 
 # C++ and openMP
 
+# CUDA
+
+Sur mon PC, la limite de thread est de 1024, et de block 2048.
+
 # remarque
 
 Pour critical et atomic, il y a un lock pour qu'une case mémoire ne soit utiliséeque par un processus à la fois. Plus il y a de cores, plus la ligne d'attente est longue. Le lock, bien que petit, cause un ralentissement. Pour le sequentiel, il n'y a pas de lock, donc pas de ralentissement.
