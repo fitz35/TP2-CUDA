@@ -18,9 +18,29 @@ History: Written by Tim Mattson, 11/1999.
 #include <sys/time.h>
 #include <fstream>
 
+#define CHECK_CUDA_ERROR(x) checkCudaError(x, __FILE__, __LINE__)
+
 static long num_steps = 100000000;
 static int num_cores=1;
 double step;
+
+__global__ void pi_kernel(float *sum, int num_steps, double step, int steps_per_thread)
+{
+    int i;
+    float x;
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    for (i = id* steps_per_thread; i < id * steps_per_thread+steps_per_thread && i<num_steps ; i +=1) {
+        x = (i + 0.5) * step;
+        atomicAdd(sum, 4.0 / (1.0 + x * x));
+    }
+}
+
+inline void checkCudaError(cudaError_t err, const char *file, int line) {
+    if (err != cudaSuccess) {
+        printf("CUDA error: %s:%d: %s)", file, line, cudaGetErrorString(err));
+        exit(-1);
+    }
+}
 
 int main (int argc, char** argv)
 {
@@ -42,36 +62,46 @@ int main (int argc, char** argv)
             exit( 1 );
         }
       }
-      
-	  int i;
-	  double x, pi, sum = 0.0;
-	  
+	  double  pi;
+      float *sum= (float * )malloc(sizeof(float));
+      sum[0]= 0; 
       step = 1.0/(double) num_steps;
 
       // Timer products.
       struct timeval begin, end;
+      
+      //Allocate memory on the device
+        float *d_sum;      
+        CHECK_CUDA_ERROR(cudaMalloc((void **)&d_sum, sizeof(float)));
+        CHECK_CUDA_ERROR(cudaMemcpy(d_sum, sum, sizeof(float), cudaMemcpyHostToDevice));
 
       gettimeofday( &begin, NULL );
+        // Launch kernel
+        pi_kernel<<<num_cores, 1>>>(d_sum, num_steps, step, floor(num_steps/num_cores) );
+        cudaDeviceSynchronize();
+        gettimeofday( &end, NULL );
 
-    #pragma omp parallel for num_threads(num_cores) reduction(+:sum)
-	  for (i=1;i<= num_steps; i++){
-		  x = (i-0.5)*step;
-		  sum = sum + 4.0/(1.0+x*x);
-	  }
+        // Copy result back to host
+        CHECK_CUDA_ERROR(cudaMemcpy(sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost));
+        
+	 
 
-	  pi = step * sum;
+	  pi = step * sum[0];
 
       
-      gettimeofday( &end, NULL );
+     
 
       // Calculate time.
       double time = 1.0 * ( end.tv_sec - begin.tv_sec ) +
                 1.0e-6 * ( end.tv_usec - begin.tv_usec );
+
+    free(sum);
+    cudaFree(d_sum);
                 
       printf("\n pi with %ld steps is %lf in %lf seconds\n ",num_steps,pi,time);
-       std::ofstream myfile;
+      std::ofstream myfile;
       myfile.open ("../pi_Stats.csv", std::ios_base::app);
-      myfile << "Reduce,"<< num_steps << "," << num_cores << "," << time << "," << pi<<std::endl ;
+      myfile << "Basic_Atomic,"<< num_steps << "," << num_cores << "," << time << "," << pi<<std::endl ;
       myfile.close();
       return 0;
 }
