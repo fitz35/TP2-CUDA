@@ -27,13 +27,13 @@ static int num_cores = 1;
 static int num_threads_per_bloc = 1;
 double step;
 
-__global__ void pi_kernel(float *sum, double step, int steps_per_thread, int num_steps)
+__global__ void pi_kernel(double * partial_sum, double step, int steps_per_thread, int num_steps)
 {
     double x;
     int i;
 
     int id = blockIdx.x * blockDim.x + threadIdx.x;
-    __shared__ float prox_partial_sum[MAX_THREADS];
+    __shared__ double prox_partial_sum[MAX_THREADS];
     prox_partial_sum[threadIdx.x] = 0;
     for (i = id * steps_per_thread; i < (id + 1) * steps_per_thread && i < num_steps; i++)
     {
@@ -55,8 +55,32 @@ __global__ void pi_kernel(float *sum, double step, int steps_per_thread, int num
     // add to global sum
     if (threadIdx.x == 0)
     {
-        atomicAdd(sum, prox_partial_sum[0]);
+        partial_sum[blockIdx.x] = prox_partial_sum[0];
     }
+}
+
+__global__ void reductionKernel(double* sum, double * partial_sum)
+{
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    __shared__ double prox_partial_sum[MAX_THREADS];
+    prox_partial_sum[threadIdx.x] = partial_sum[id];
+    __syncthreads();
+
+    // reduxion
+    for (int s = blockDim.x / 2; s > 0; s /= 2)
+    {
+        if (threadIdx.x < s)
+        {
+            prox_partial_sum[threadIdx.x] += prox_partial_sum[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+    // add to global sum
+    if (threadIdx.x == 0)
+    {
+        sum[0] = prox_partial_sum[0];
+    }
+    
 }
 
 inline void checkCudaError(cudaError_t err, const char *file, int line)
@@ -100,32 +124,36 @@ int main(int argc, char **argv)
         }
     }
     double pi;
-    float *sum = (float *)malloc(sizeof(float));
+    double *sum = (double *)malloc(sizeof(double));
     sum[0] = 0;
 
     double step = 1.0 / (double)num_steps;
     int all_threads = num_threads_per_bloc * num_cores;
     int steps_per_thread = floor(num_steps / (all_threads));
     printf("steps_per_thread = %d \n", steps_per_thread);
-    printf("step = %lf \n", step);
+    printf("step = %f \n", step);
 
     // Timer products.
     struct timeval begin, end;
 
     // Allocate memory on the device
     //  result
-    float *d_sum;
-    CHECK_CUDA_ERROR(cudaMalloc((void **)&d_sum, sizeof(float)));
-    CHECK_CUDA_ERROR(cudaMemcpy(d_sum, sum, sizeof(float), cudaMemcpyHostToDevice));
+    double *d_sum;
+    CHECK_CUDA_ERROR(cudaMalloc((void **)&d_sum, sizeof(double)));
+
+    // reduction array
+    double *d_partial_sum;
+    CHECK_CUDA_ERROR(cudaMalloc((void **)&d_partial_sum, num_cores * sizeof(double)));
 
     gettimeofday(&begin, NULL);
     // Launch kernel
-    pi_kernel<<<num_cores, num_threads_per_bloc>>>(d_sum, step, steps_per_thread, num_steps);
+    pi_kernel<<<num_cores, num_threads_per_bloc>>>(d_partial_sum, step, steps_per_thread, num_steps);
     cudaDeviceSynchronize();
+    reductionKernel<<<1, num_cores>>>(d_sum, d_partial_sum);
     gettimeofday(&end, NULL);
 
     // Copy result back to host
-    CHECK_CUDA_ERROR(cudaMemcpy(sum, d_sum, sizeof(float), cudaMemcpyDeviceToHost));
+    CHECK_CUDA_ERROR(cudaMemcpy(sum, d_sum, sizeof(double), cudaMemcpyDeviceToHost));
 
     pi = step * sum[0];
 
@@ -139,7 +167,7 @@ int main(int argc, char **argv)
     printf("\n pi with %ld steps is %lf in %lf seconds\n ", num_steps, pi, time);
     std::ofstream myfile;
     myfile.open("../pi_Stats.csv", std::ios_base::app);
-    myfile << "Partial_Reduction," << num_steps << "," << num_cores << "," << num_threads_per_bloc << "," << time << "," << pi << std::endl;
+    myfile << "Reduction," << num_steps << "," << num_cores << "," << num_threads_per_bloc << "," << time << "," << pi << std::endl;
     myfile.close();
     return 0;
 }
