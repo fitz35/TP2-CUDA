@@ -64,14 +64,21 @@ inline void checkCudaError(cudaError_t err, const char *file, int line) {
 __global__ void matrixKernel(float * result, float * x, float * y, float * A, int N, int M) {
   int iN = blockIdx.x;
   int iM = threadIdx.x;
-  __shared__ float sum;
-  sum = 0;
+  __shared__ float sum[MAX_THREADS];
+  sum[threadIdx.x] = A[iN*M+iM]*x[iM];
   __syncthreads();
-  atomicAdd(&sum, A[iN*M+iM]*x[iM]);
-  __syncthreads();
-  // multiply y[iM] by sum
-  if(iM == 0) {
-    y[iN] *= sum;
+  // reduce
+  for (int s = blockDim.x / 2; s > 0; s /= 2)
+    {
+        if (threadIdx.x < s)
+        {
+            sum[threadIdx.x] += sum[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+
+  if (threadIdx.x == 0) {
+    y[iN] *= sum[0];
     atomicAdd(&result[0], y[iN]);
   }
 }
@@ -205,7 +212,7 @@ int main(int argc, char *argv[])
 
   std::ofstream myfile;
   myfile.open("../vector_Stats.csv", std::ios_base::app);
-  myfile << "Atomic," << N << "," << M << "," << time << "," << (Gbytes * 1000) << "," << (Gbytes / time) << std::endl;
+  myfile << "Partial_sum," << N << "," << M << "," << time << "," << (Gbytes * 1000) << "," << (Gbytes / time) << std::endl;
   myfile.close();
   return 0;
 }
