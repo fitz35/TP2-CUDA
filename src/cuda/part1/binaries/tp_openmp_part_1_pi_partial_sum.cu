@@ -130,7 +130,7 @@ int main (int argc, char** argv)
       printf("\n pi with %ld steps is %lf in %lf seconds\n ",num_steps,pi,time);
       std::ofstream myfile;
       myfile.open ("../pi_Stats.csv", std::ios_base::app);
-      myfile << "Basic_Partial_Sum,"<< num_steps << "," << num_cores << "," << time << "," << pi<<std::endl ;
+      myfile << "Partial_Sum,"<< num_steps << "," << num_cores << "," << num_threads_per_bloc << "," << time << "," << pi<<std::endl ;
       myfile.close();
       return 0;
 }
