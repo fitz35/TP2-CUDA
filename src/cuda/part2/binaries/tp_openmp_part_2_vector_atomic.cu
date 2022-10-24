@@ -50,6 +50,8 @@
 
 #include <cmath>
 
+#define MAX_THREADS 1024
+
 #define CHECK_CUDA_ERROR(x) checkCudaError(x, __FILE__, __LINE__)
 
 inline void checkCudaError(cudaError_t err, const char *file, int line) {
@@ -59,14 +61,19 @@ inline void checkCudaError(cudaError_t err, const char *file, int line) {
     }
 }
 
-__global__ void matrixKernel(double * x, double * y, double * A, int N, int M) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  double sum = 0;
-  for (int j = 0; j < M; j++)
-  {
-    sum += A[i * M + j] * x[j];
+__global__ void matrixKernel(float * result, float * x, float * y, float * A, int N, int M) {
+  int iN = blockIdx.x;
+  int iM = threadIdx.x;
+  __shared__ float sum;
+  sum = 0;
+  __syncthreads();
+  atomicAdd(&sum, A[iN*M+iM]*x[iM]);
+  __syncthreads();
+  // multiply y[iM] by sum
+  if(iM == 0) {
+    y[iN] *= sum;
+    atomicAdd(&result[0], y[iN]);
   }
-  y[i] *= sum;
 }
 
 void checkSizes(int &N, int &M, long &S);
@@ -110,32 +117,39 @@ int main(int argc, char *argv[])
   checkSizes(N, M, S);
 
   // Allocate x,y,A
-  auto y = new double[N];
+  auto y = new float[N];
   for (int i = 0; i < N; i++)
   {
     y[i] = 1;
   }
-  auto x = new double[M];
+  auto x = new float[M];
   for (int i = 0; i < M; i++)
   {
     x[i] = 1;
   }
-  auto A = new double[S];
+  auto A = new float[S];
   for (int i = 0; i < S; i++)
   {
     A[i] = 1;
   }
 
+  float * result;
+  result = new float[1];
+  result[0] = 0;
+
   // Allocate device memory.
-  double *d_x, *d_y, *d_A;
-  CHECK_CUDA_ERROR(cudaMalloc(&d_x, M * sizeof(double)));
-  CHECK_CUDA_ERROR(cudaMalloc(&d_y, N * sizeof(double)));
-  CHECK_CUDA_ERROR(cudaMalloc(&d_A, S * sizeof(double)));
+  float *d_x, *d_y, *d_A;
+  CHECK_CUDA_ERROR(cudaMalloc(&d_x, M * sizeof(float)));
+  CHECK_CUDA_ERROR(cudaMalloc(&d_y, N * sizeof(float)));
+  CHECK_CUDA_ERROR(cudaMalloc(&d_A, S * sizeof(float)));
+  float *d_result;
+  CHECK_CUDA_ERROR(cudaMalloc(&d_result, sizeof(float)));
 
   // Copy data to device.
-  CHECK_CUDA_ERROR(cudaMemcpy(d_x, x, M * sizeof(double), cudaMemcpyHostToDevice));
-  CHECK_CUDA_ERROR(cudaMemcpy(d_y, y, N * sizeof(double), cudaMemcpyHostToDevice));
-  CHECK_CUDA_ERROR(cudaMemcpy(d_A, A, S * sizeof(double), cudaMemcpyHostToDevice));
+  CHECK_CUDA_ERROR(cudaMemcpy(d_x, x, M * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA_ERROR(cudaMemcpy(d_y, y, N * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA_ERROR(cudaMemcpy(d_A, A, S * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA_ERROR(cudaMemcpy(d_result, result, sizeof(float), cudaMemcpyHostToDevice));
 
   // Timer products.
   struct timeval begin, end;
@@ -147,40 +161,33 @@ int main(int argc, char *argv[])
   // Sum the results of the previous step into a single variable
   // Multiply the result of the previous step with the i value of vector y
   // Sum the results of the previous step into a single variable (result)
-
-  double result = 0;
-
-  matrixKernel<<<N, 1>>>(d_x, d_y, d_A, N, M);
+  matrixKernel<<<N, M>>>(d_result, d_x, d_y, d_A, N, M);
   cudaDeviceSynchronize();
 
-  CHECK_CUDA_ERROR(cudaMemcpy(y, d_y, N * sizeof(double), cudaMemcpyDeviceToHost));
+  CHECK_CUDA_ERROR(cudaMemcpy(result, d_result, sizeof(float), cudaMemcpyDeviceToHost));
 
-  for (int i = 0; i < N; i++)
+  printf("  Computed result for %d x %d is %lf\n", N, M, result[0]);
+
+  const float solution = (float)N * (float)M;
+
+  if (result[0] != solution)
   {
-    result += y[i];
-  }
-  printf("  Computed result for %d x %d is %lf\n", N, M, result);
-
-  const double solution = (double)N * (double)M;
-
-  if (result != solution)
-  {
-    printf("  Error: result( %lf ) != solution( %lf )\n", result, solution);
+    printf("  Error: result( %lf ) != solution( %lf )\n", result[0], solution);
   }
 
   gettimeofday(&end, NULL);
 
   // Calculate time.
-  // double time = timer.seconds();
-  double time = 1.0 * (end.tv_sec - begin.tv_sec) +
+  // float time = timer.seconds();
+  float time = 1.0 * (end.tv_sec - begin.tv_sec) +
                 1.0e-6 * (end.tv_usec - begin.tv_usec);
 
   // Calculate bandwidth.
   // Each matrix A row (each of length M) is read once.
   // The x vector (of length M) is read N times.
   // The y vector (of length N) is read once.
-  // double Gbytes = 1.0e-9 * double( sizeof(double) * ( 2 * M * N + N ) );
-  double Gbytes = 1.0e-9 * double(sizeof(double) * (M + M * N + N));
+  // float Gbytes = 1.0e-9 * float( sizeof(float) * ( 2 * M * N + N ) );
+  float Gbytes = 1.0e-9 * float(sizeof(float) * (M + M * N + N));
 
   // Print results (problem size, time and bandwidth in GB/s).
   printf("  N( %d ) M( %d ) problem( %g MB ) time( %g s ) bandwidth( %g GB/s )\n",
@@ -194,6 +201,7 @@ int main(int argc, char *argv[])
   CHECK_CUDA_ERROR(cudaFree(d_A));
   CHECK_CUDA_ERROR(cudaFree(d_y));
   CHECK_CUDA_ERROR(cudaFree(d_x));
+  CHECK_CUDA_ERROR(cudaFree(d_result));
 
   std::ofstream myfile;
   myfile.open("../vector_Stats.csv", std::ios_base::app);
