@@ -20,6 +20,7 @@ History: Written by Tim Mattson, 11/1999.
 
 static long num_steps = 100000000;
 static int num_cores=1;
+static int num_threads_per_bloc = 1;
 double step;
 
 int main (int argc, char** argv)
@@ -30,6 +31,11 @@ int main (int argc, char** argv)
         if ( ( strcmp( argv[ i ], "-N" ) == 0 ) || ( strcmp( argv[ i ], "-num_steps" ) == 0 ) ) {
             num_steps = atol( argv[ ++i ] );
             printf( "  User num_steps is %ld\n", num_steps );
+        }
+        if ((strcmp(argv[i], "-T") == 0) || (strcmp(argv[i], "-num_thread") == 0))
+        {
+            num_threads_per_bloc = atol(argv[++i]);
+            printf("  User num_threads is %d\n", num_threads_per_bloc);
         }
         if ( ( strcmp( argv[ i ], "-C" ) == 0 ) || ( strcmp( argv[ i ], "-num_cores" ) == 0 ) ) {
             num_cores = atol( argv[ ++i ] );
@@ -71,7 +77,7 @@ int main (int argc, char** argv)
       printf("\n pi with %ld steps is %lf in %lf seconds\n ",num_steps,pi,time);
       std::ofstream myfile;
       myfile.open ("../pi_Stats.csv", std::ios_base::app);
-      myfile << "Sequentiel,"<< num_steps << "," << num_cores << "," << time << "," << pi<<std::endl ;
+      myfile << "Sequentiel,"<< num_steps << "," << num_cores << "," << num_threads_per_bloc << "," << time << "," << pi<<std::endl ;
       myfile.close();
       return 0;
 }
