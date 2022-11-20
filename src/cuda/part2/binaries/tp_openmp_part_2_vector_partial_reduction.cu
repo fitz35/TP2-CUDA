@@ -212,7 +212,7 @@ int main(int argc, char *argv[])
 
   std::ofstream myfile;
   myfile.open("../vector_Stats.csv", std::ios_base::app);
-  myfile << "Partial_sum," << N << "," << M << "," << time << "," << (Gbytes * 1000) << "," << (Gbytes / time) << std::endl;
+  myfile << "Partial_reduction," << N << "," << M << "," << time << "," << (Gbytes * 1000) << "," << (Gbytes / time) << std::endl;
   myfile.close();
   return 0;
 }
